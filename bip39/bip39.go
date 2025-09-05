@@ -1,4 +1,3 @@
-// Package bip39 implements the BIP39 specification for mnemonic codes.
 package bip39
 
 import (
@@ -7,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"crypto/sha512"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -22,55 +22,59 @@ var (
 	ErrMnemonicLength = errors.New("bip39: mnemonic must be 12, 15, 18, 21 or 24 words")
 )
 
-// getBits extracts n bits from a buffer at a given bit offset
-func getBits(buf []byte, offset, n int) uint32 {
-	if n > 32 {
-		panic("getBits can't extract more than 32 bits")
-	}
-
-	byteOffset := offset / 8
-	bitOffset := offset % 8
-
+// getBits extracts n bits from a buffer starting at offset (in bits)
+// It assumes the buffer represents a big-endian bit stream.
+func getBits(buf []byte, bitOffset, numBits int) uint32 {
 	var result uint32
-	// Read up to 4 bytes to get enough bits
-	for i := 0; i < 4 && byteOffset+i < len(buf); i++ {
-		result |= uint32(buf[byteOffset+i]) << uint(8*i)
+	for i := 0; i < numBits; i++ {
+		byteIndex := (bitOffset + i) / 8
+		bitInByteIndex := (bitOffset + i) % 8
+		
+		// Check if we're trying to read beyond the buffer length
+		if byteIndex >= len(buf) {
+			// This case should not happen with correct inputs given length checks prior.
+			// However, to prevent panic, return 0 or an error if this were a public function.
+			// For internal helper, panic might be acceptable or indicates a larger logic error.
+			return 0 
+		}
+
+		// Read the bit. Bits are ordered MSB (0) to LSB (7) within a byte.
+		bit := (buf[byteIndex] >> (7 - bitInByteIndex)) & 0x01
+		
+		result = (result << 1) | uint32(bit)
 	}
-
-	// Shift right to align the desired bits to the right
-	result >>= uint(bitOffset)
-
-	// Mask to keep only the desired number of bits
-	mask := uint32(1<<uint(n)) - 1
-	result &= mask
-
 	return result
 }
 
-// indicesToBytes converts 11-bit word indices back to a byte array
-func indicesToBytes(indices []int, bits int) []byte {
-	buf := make([]byte, (bits+7)/8)
-	
-	for i, index := range indices {
-		// For each word, set 11 bits in the bit buffer
-		for j := 0; j < 11; j++ {
-			// Check if bit j of index is set (bit 10 is MSB)
-			bitSet := (index & (1 << (10 - j))) != 0
-			
-			// Calculate position in bit buffer
-			bitPos := i*11 + j
-			bytePos := bitPos / 8
-			bitOffset := 7 - (bitPos % 8) // Bit 0 is MSB in byte
-			
-			// Set the bit if needed
-			if bitSet && bytePos < len(buf) {
-				buf[bytePos] |= (1 << bitOffset)
+
+// indicesToBytes converts 11-bit word indices into a big-endian byte array.
+func indicesToBytes(indices []int, totalBits int) []byte {
+	// Allocate enough bytes to hold all bits.
+	// (totalBits + 7) / 8 ensures correct ceiling division.
+	buf := make([]byte, (totalBits+7)/8)
+
+	for wordNum, index := range indices {
+		for bitInWord := 0; bitInWord < 11; bitInWord++ {
+			// Calculate the global bit position.
+			globalBitPos := wordNum*11 + bitInWord
+
+			// Determine which byte and which bit within that byte this global bit corresponds to.
+			byteIndex := globalBitPos / 8
+			bitInByteIndex := globalBitPos % 8
+
+			// Get the bit from the 11-bit index (from MSB to LSB).
+			// If bitInWord is 0, we want the 10th bit (1<<10). If 10, we want 0th bit (1<<0).
+			bit := (index >> (10 - bitInWord)) & 0x01
+
+			// Set the bit in the buffer. Bits are ordered MSB (0) to LSB (7) within a byte.
+			if bit == 1 {
+				buf[byteIndex] |= (0x01 << (7 - bitInByteIndex))
 			}
 		}
 	}
-	
 	return buf
 }
+
 
 // NewEntropy generates a new entropy byte slice with the given bit size.
 // bitSize must be in [128, 256] and a multiple of 32.
@@ -103,21 +107,28 @@ func NewMnemonic(entropy []byte) (string, error) {
 
 	// Create a buffer with entropy + checksum
 	entropyWithChecksumBitLen := entropyBitLength + int(checksumBitLength)
-	entropyWithChecksumByteLen := (entropyWithChecksumBitLen + 7) / 8
-	buf := make([]byte, entropyWithChecksumByteLen)
-	copy(buf, entropy)
 	
-	// Add the checksum bits to the end
-	checksumByte := hash[0]
+	// Create a byte buffer to hold entropy + checksum bits
+	combinedBitsBuffer := make([]byte, (entropyWithChecksumBitLen+7)/8)
+	
+	// Copy entropy bytes directly
+	copy(combinedBitsBuffer, entropy)
+
+	// Append checksum bits
+	// For each bit in the checksum, set it in the combinedBitsBuffer
 	for i := 0; i < int(checksumBitLength); i++ {
-		// Get bit i from checksumByte
-		bit := (checksumByte >> (7 - i)) & 1
+		// Get the i-th bit from the checksum byte (MSB to LSB)
+		bit := (hash[0] >> (7 - uint(i))) & 0x01
 		
-		// Set bit in buf at position entropyBitLength + i
-		bytePos := (entropyBitLength + i) / 8
-		bitPos := (entropyBitLength + i) % 8
+		// Calculate the global position for this checksum bit
+		globalBitPos := entropyBitLength + i
+		
+		// Set the bit in the combined buffer
+		byteIndex := globalBitPos / 8
+		bitInByteIndex := globalBitPos % 8
+		
 		if bit == 1 {
-			buf[bytePos] |= 1 << (7 - bitPos)
+			combinedBitsBuffer[byteIndex] |= (0x01 << (7 - bitInByteIndex))
 		}
 	}
 
@@ -127,8 +138,8 @@ func NewMnemonic(entropy []byte) (string, error) {
 	// Generate the mnemonic words
 	words := make([]string, wordCount)
 	for i := 0; i < wordCount; i++ {
-		// Extract the 11-bit word index
-		wordIdx := getBits(buf, i*11, 11)
+		// Extract the 11-bit word index using the corrected getBits
+		wordIdx := getBits(combinedBitsBuffer, i*11, 11)
 		
 		// Convert to word
 		if int(wordIdx) >= len(Wordlist) {
@@ -160,45 +171,52 @@ func MnemonicToByteArray(mnemonic string) ([]byte, error) {
 		indices[i] = index
 	}
 
-	// Calculate entropy and checksum sizes
-	entropyBitLength := wordsLength * 11 * 32 / 33
-	checksumBitLength := wordsLength * 11 / 33
-	entropyByteLength := entropyBitLength / 8
-
-	// Reconstruct the bit buffer
+	// Calculate total bits (entropy + checksum)
 	totalBits := wordsLength * 11
-	buf := indicesToBytes(indices, totalBits)
+
+	// Reconstruct the bit buffer from indices
+	combinedBitsBuffer := indicesToBytes(indices, totalBits)
+
+	// Determine entropy and checksum bit lengths
+	entropyBitLength := (wordsLength * 11) - (wordsLength * 11 / 33) // Recalculate based on word length
+	checksumBitLength := wordsLength * 11 / 33 // Recalculate based on word length
 	
-	// Extract entropy bytes
-	entropy := make([]byte, entropyByteLength)
-	copy(entropy, buf[:entropyByteLength])
+	// Extract entropy bytes from the combined buffer.
+	entropyBytes := make([]byte, entropyBitLength/8)
 	
-	// Extract checksum bits
-	var checksumByte byte
-	if entropyByteLength < len(buf) {
-		checksumByte = buf[entropyByteLength]
+	for i := 0; i < entropyBitLength; i++ {
+		byteIndex := i / 8
+		bitInByteIndex := i % 8
+		bit := getBits(combinedBitsBuffer, i, 1) // Get 1 bit at a time
+		if bit == 1 {
+			entropyBytes[byteIndex] |= (0x01 << (7 - bitInByteIndex))
+		}
 	}
 
-	// Calculate the expected checksum
-	hash := sha256.Sum256(entropy)
-	expectedChecksum := hash[0] >> (8 - checksumBitLength)
-
-	// Extract the actual checksum bits
-	actualChecksum := checksumByte >> (8 - checksumBitLength)
+	// Calculate the expected checksum from the extracted entropy.
+	expectedHash := sha256.Sum256(entropyBytes)
+	expectedChecksumValue := uint32(expectedHash[0] >> (8 - checksumBitLength))
+	
+	// Extract the actual checksum bits from the combinedBitsBuffer.
+	actualChecksumValue := uint32(0)
+	for i := 0; i < int(checksumBitLength); i++ {
+		bit := getBits(combinedBitsBuffer, entropyBitLength + i, 1) // Get 1 bit at a time from checksum part
+		actualChecksumValue = (actualChecksumValue << 1) | bit
+	}
 
 	// Verify the checksum
-	if actualChecksum != expectedChecksum {
+	if actualChecksumValue != expectedChecksumValue {
 		return nil, ErrInvalidMnemonic
 	}
 
-	return entropy, nil
+	return entropyBytes, nil
 }
 
 // NewSeed generates a new seed from the given mnemonic and passphrase.
 // The passphrase can be empty.
 func NewSeed(mnemonic, passphrase string) []byte {
 	salt := "mnemonic" + passphrase
-	seed := pbkdf2.Key([]byte(mnemonic), []byte(salt), 2048, 64, sha256.New)
+	seed := pbkdf2.Key([]byte(mnemonic), []byte(salt), 2048, 64, sha512.New)
 	return seed
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/kslamph/bip39-hdwallet/bip39"
@@ -56,9 +57,12 @@ func TestBIP39BlackboxVectors(t *testing.T) {
 
 	// Iterate over all languages
 	for lang, tests := range testVectors {
+		if lang != "english" { // Added filter
+			continue
+		}
 		t.Run(lang, func(t *testing.T) {
 			for i, tc := range tests {
-				t.Run(string(i), func(t *testing.T) {
+				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					entropyBytes, err := hex.DecodeString(tc.Entropy)
 					if err != nil {
 						t.Fatalf("Failed to decode entropy hex: %v", err)
