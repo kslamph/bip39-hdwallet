@@ -1,7 +1,6 @@
 package hdwallet
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -9,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv" // Added for DerivePath parsing
+	"strings" // Added for path parsing
 
 	"golang.org/x/crypto/ripemd160"
-	"github.com/btcsuite/btcd/btcutil/base58"
+	"github.com/btcsuite/btcd/btcutil/base58" // Will use base58.Encode only
+	"github.com/btcsuite/btcd/btcec/v2"      // Added btcec/v2
 )
 
 const (
@@ -71,20 +73,9 @@ func NewMasterKey(seed []byte) (*Key, error) {
 	IL := I[:32]
 	IR := I[32:]
 
-	// The private key cannot be zero
-	zero := new(big.Int)
+	// The private key cannot be zero or greater than/equal to the curve order N
 	privKeyInt := new(big.Int).SetBytes(IL)
-	if privKeyInt.Cmp(zero) == 0 {
-		return nil, ErrInvalidKey
-	}
-
-	// The private key cannot be greater than or equal to the order of the curve
-	// For secp256k1, the order is 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-	order := new(big.Int).SetBytes([]byte{
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
-		0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
-	})
-	if privKeyInt.Cmp(order) >= 0 {
+	if privKeyInt.Cmp(big.NewInt(0)) == 0 || privKeyInt.Cmp(btcec.S256().N) >= 0 {
 		return nil, ErrInvalidKey
 	}
 
@@ -106,11 +97,8 @@ func (k *Key) PublicKey() []byte {
 		return k.Key
 	}
 
-	// For simplicity, we're returning a placeholder
-	// In a real implementation, you would derive the public key from the private key using ECDSA
-	pubKey := make([]byte, PublicKeyCompressedLength)
-	pubKey[0] = 0x02 // Even y-coordinate
-	copy(pubKey[1:], k.Key)
+	privKey, _ := btcec.PrivKeyFromBytes(k.Key)
+	pubKey := privKey.PubKey().SerializeCompressed()
 	return pubKey
 }
 
@@ -131,22 +119,24 @@ func (k *Key) Fingerprint() []byte {
 // Derive derives a child key at the given index
 func (k *Key) Derive(index uint32) (*Key, error) {
 	// Prepare the data to be hashed
-	data := make([]byte, 37)
+	var data []byte
 
-	// Hardened child
+	// Hardened child (i >= 0x80000000)
 	if index >= HardenedKeyStart {
-		// Data = 0x00 || ser256(kpar) || ser32(i)
+		// If parent is public, cannot derive hardened child
 		if !k.IsPrivate {
 			return nil, ErrDerivingHardenedFromPublic
 		}
+		// Data = 0x00 || ser256(kpar) || ser32(i)
+		data = make([]byte, 37)
 		data[0] = 0x00
-		copy(data[1:], k.Key)
+		copy(data[1:], k.Key) // k.Key is private key here
 		binary.BigEndian.PutUint32(data[33:], index)
 	} else {
-		// Normal child
-		// Data = serP(point(kpar)) || ser32(i)
-		pubKey := k.PublicKey()
-		copy(data, pubKey)
+		// Normal child (i < 0x80000000)
+		// Data = serP(Kpar) || ser32(i)
+		data = make([]byte, 37)
+		copy(data, k.PublicKey()) // k.PublicKey() returns compressed public key
 		binary.BigEndian.PutUint32(data[33:], index)
 	}
 
@@ -155,51 +145,78 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 	h.Write(data)
 	I := h.Sum(nil)
 
-	// Split I into two 32-byte sequences
+	// Split I into two 32-byte sequences, IL and IR
 	IL := I[:32]
 	IR := I[32:]
 
-	// The returned child key ki is parse256(IL) + kpar (mod n)
-	var childKey []byte
+	// Parse IL as a 256-bit integer
+	ilInt := new(big.Int).SetBytes(IL)
+
+	// Check if IL is valid (IL < n)
+	if ilInt.Cmp(btcec.S256().N) >= 0 {
+		// This should theoretically not happen with HMAC-SHA512 output
+		return nil, ErrInvalidKey // Or, per spec, increment index and try again
+	}
+
+	var childKeyBytes []byte
+	var isPrivateChild bool
+
 	if k.IsPrivate {
-		// Private key derivation
-		// childKey = (parse256(IL) + kpar) mod n
-		ilInt := new(big.Int).SetBytes(IL)
-		privKeyInt := new(big.Int).SetBytes(k.Key)
-		
-		// For secp256k1, the order is 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-		order := new(big.Int).SetBytes([]byte{
-			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
-			0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
-		})
-		
-		childKeyInt := new(big.Int).Add(ilInt, privKeyInt)
-		childKeyInt = childKeyInt.Mod(childKeyInt, order)
-		
-		// Check if the key is zero
-		zero := new(big.Int)
-		if childKeyInt.Cmp(zero) == 0 {
+		// Private parent key -> private child key
+		// k_i = (IL + k_par) mod n
+		parentPrivKeyInt := new(big.Int).SetBytes(k.Key) // k.Key is parent private key
+		childPrivKeyInt := new(big.Int).Add(ilInt, parentPrivKeyInt)
+		childPrivKeyInt.Mod(childPrivKeyInt, btcec.S256().N) // mod n
+
+		// Check if child private key is valid (0 < childPrivKeyInt < n)
+		if childPrivKeyInt.Cmp(big.NewInt(0)) == 0 || childPrivKeyInt.Cmp(btcec.S256().N) >= 0 {
+			return nil, ErrInvalidKey // Or, per spec, increment index and try again
+		}
+
+		childKeyBytes = childPrivKeyInt.FillBytes(make([]byte, PrivateKeyLength)) // Pad to 32 bytes
+		isPrivateChild = true
+	} else {
+		// Public parent key -> public child key (only for non-hardened children)
+		// K_i = point(IL) + K_par
+		if index >= HardenedKeyStart {
+			return nil, ErrDerivingHardenedFromPublic // Should have been caught earlier
+		}
+
+		// Convert IL to a point on the curve
+		// K_i = point(IL)
+		ilPointX, ilPointY := btcec.S256().ScalarBaseMult(IL)
+		if ilPointX == nil { // point(IL) is the point at infinity
 			return nil, ErrInvalidKey
 		}
+
+		// Add parent public key K_par to point(IL)
+		parentPubKey, err := btcec.ParsePubKey(k.Key) // k.Key is parent public key
+		if err != nil {
+			return nil, err // Invalid parent public key
+		}
+
+		childPubKeyX, childPubKeyY := btcec.S256().Add(ilPointX, ilPointY, parentPubKey.X(), parentPubKey.Y())
 		
-		// Pad to 32 bytes
-		childKey = make([]byte, 32)
-		childKeyBytes := childKeyInt.Bytes()
-		copy(childKey[32-len(childKeyBytes):], childKeyBytes)
-	} else {
-		// Public key derivation would go here
-		// For simplicity, we're just using the IL part
-		childKey = IL
+		// Serialize compressed
+		// Manually create compressed public key bytes from X and Y coordinates.
+		childKeyBytes = make([]byte, PublicKeyCompressedLength)
+		if childPubKeyY.Bit(0) == 0 { // Y is even
+			childKeyBytes[0] = 0x02
+		} else { // Y is odd
+			childKeyBytes[0] = 0x03
+		}
+		childPubKeyX.FillBytes(childKeyBytes[1:]) // X coordinate
+		isPrivateChild = false
 	}
 
 	// Create the child key
 	child := &Key{
-		Key:               childKey,
+		Key:               childKeyBytes,
 		ChainCode:         IR,
 		Depth:             k.Depth + 1,
 		Index:             index,
 		ParentFingerprint: k.Fingerprint(),
-		IsPrivate:         k.IsPrivate,
+		IsPrivate:         isPrivateChild,
 	}
 
 	return child, nil
@@ -214,39 +231,41 @@ func (k *Key) DerivePath(path string) (*Key, error) {
 
 	// Split the path
 	parts := []string{}
-	if path[0] == 'm' {
-		if len(path) < 2 || path[1] != '/' {
-			return nil, ErrInvalidPath
-		}
+	// Check for "m/" prefix only if it's the master path
+	if strings.HasPrefix(path, "m/") {
+		path = path[2:]
+	} else if strings.HasPrefix(path, "M/") { // BIP32 often uses M for master public, handle that too
 		path = path[2:]
 	}
-	
+
 	// Split by "/"
-	for _, part := range bytes.Split([]byte(path), []byte("/")) {
-		parts = append(parts, string(part))
+	splitParts := strings.Split(path, "/")
+	for _, part := range splitParts {
+		if len(part) == 0 {
+			continue
+		}
+		parts = append(parts, part)
 	}
 
 	// Derive each part
 	key := k
 	for _, part := range parts {
-		if len(part) == 0 {
-			continue
-		}
-
 		var index uint32
-		if part[len(part)-1] == '\'' {
+		if strings.HasSuffix(part, "'") || strings.HasSuffix(part, "H") { // Check for hardened keys
 			// Hardened key
-			_, err := fmt.Sscanf(part[:len(part)-1], "%d", &index)
+			parsedPart := strings.TrimSuffix(strings.TrimSuffix(part, "H"), "'")
+			val, err := strconv.ParseUint(parsedPart, 10, 32)
 			if err != nil {
-				return nil, ErrInvalidPath
+				return nil, fmt.Errorf("%w: invalid hardened child index '%s'", ErrInvalidPath, part)
 			}
-			index += HardenedKeyStart
+			index = uint32(val) + HardenedKeyStart
 		} else {
 			// Normal key
-			_, err := fmt.Sscanf(part, "%d", &index)
+			val, err := strconv.ParseUint(part, 10, 32)
 			if err != nil {
-				return nil, ErrInvalidPath
+				return nil, fmt.Errorf("%w: invalid child index '%s'", ErrInvalidPath, part)
 			}
+			index = uint32(val)
 		}
 
 		child, err := key.Derive(index)
@@ -280,12 +299,11 @@ func (k *Key) SerializedSize() int {
 func (k *Key) B58Serialize(isPublic bool) string {
 	// 4 bytes: version bytes
 	// mainnet: 0x0488B21E public, 0x0488ADE4 private
-	// testnet: 0x043587CF public, 0x04358394 private
-	var version []byte
+	var versionBytes []byte
 	if isPublic {
-		version = []byte{0x04, 0x88, 0xB2, 0x1E} // xpub
+		versionBytes = []byte{0x04, 0x88, 0xB2, 0x1E} // xpub
 	} else {
-		version = []byte{0x04, 0x88, 0xAD, 0xE4} // xprv
+		versionBytes = []byte{0x04, 0x88, 0xAD, 0xE4} // xprv
 	}
 
 	// 1 byte: depth
@@ -294,7 +312,7 @@ func (k *Key) B58Serialize(isPublic bool) string {
 	// 4 bytes: the fingerprint of the parent's key (0x00000000 if master key)
 	parentFingerprint := k.ParentFingerprint
 
-	// 4 bytes: child number. This is ser32(i) for i in xi = xpar/i, with xi the key being serialized. (0x00000000 if master key)
+	// 4 bytes: child number.
 	childIndex := make([]byte, 4)
 	binary.BigEndian.PutUint32(childIndex, k.Index)
 
@@ -302,7 +320,6 @@ func (k *Key) B58Serialize(isPublic bool) string {
 	chainCode := k.ChainCode
 
 	// 33 bytes: the public key or private key data
-	// serP(K) for public keys, 0x00 || ser256(k) for private keys
 	var keyData []byte
 	if isPublic {
 		keyData = k.PublicKey()
@@ -312,13 +329,23 @@ func (k *Key) B58Serialize(isPublic bool) string {
 		copy(keyData[1:], k.Key)
 	}
 
-	// Concatenate all parts
-	raw := append(version, depth...)
-	raw = append(raw, parentFingerprint...)
-	raw = append(raw, childIndex...)
-	raw = append(raw, chainCode...)
-	raw = append(raw, keyData...)
+	// Concatenate all parts into a 78-byte payload
+	payload := make([]byte, 0, 78)
+	payload = append(payload, versionBytes...)
+	payload = append(payload, depth...)
+	payload = append(payload, parentFingerprint...)
+	payload = append(payload, childIndex...)
+	payload = append(payload, chainCode...)
+	payload = append(payload, keyData...)
 
-	// Base58Check encode
-	return base58.CheckEncode(raw, 0) // The '0' is for the version byte, which is already part of 'raw'
+	// Double SHA256 checksum
+	firstHash := sha256.Sum256(payload)
+	secondHash := sha256.Sum256(firstHash[:])
+	checksum := secondHash[:4] // First 4 bytes of the double hash
+
+	// Append checksum to payload
+	finalData := append(payload, checksum...)
+
+	// Base58 encode the result
+	return base58.Encode(finalData)
 }
