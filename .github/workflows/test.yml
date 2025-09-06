@@ -22,7 +22,7 @@ jobs:
       run: go mod download
 
     - name: Run tests with coverage
-      run: go test -coverprofile=coverage.txt ./...
+      run: go test -coverprofile=coverage.txt -coverpkg=./bip39,./hdwallet,./tests ./...
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5

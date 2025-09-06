@@ -313,3 +313,133 @@ func TestIsMnemonicValid(t *testing.T) {
 		t.Errorf("IsMnemonicValid(%s) = true; want false", invalidMnemonic)
 	}
 }
+
+// TestGetWordList tests the GetWordList function
+func TestGetWordList(t *testing.T) {
+	wordList := GetWordList()
+	if len(wordList) != 2048 {
+		t.Errorf("GetWordList should return 2048 words, got %d", len(wordList))
+	}
+}
+
+// TestGetWordIndex tests the GetWordIndex function
+func TestGetWordIndex(t *testing.T) {
+	// Test with a valid word
+	index, ok := GetWordIndex("abandon")
+	if !ok {
+		t.Error("GetWordIndex should find 'abandon'")
+	}
+	if index != 0 {
+		t.Errorf("GetWordIndex('abandon') should return 0, got %d", index)
+	}
+
+	// Test with an invalid word
+	_, ok = GetWordIndex("invalidword")
+	if ok {
+		t.Error("GetWordIndex should not find 'invalidword'")
+	}
+}
+
+// TestMnemonicToByteArrayEdgeCases tests edge cases in MnemonicToByteArray
+func TestMnemonicToByteArrayEdgeCases(t *testing.T) {
+	// Test with valid mnemonic but different raw parameter values
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+	// Test without raw parameter
+	entropy1, err := MnemonicToByteArray(mnemonic)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray without raw parameter failed: %v", err)
+	}
+
+	// Test with raw parameter set to false
+	entropy2, err := MnemonicToByteArray(mnemonic, false)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray with raw=false failed: %v", err)
+	}
+
+	// Test with raw parameter set to true
+	entropy3, err := MnemonicToByteArray(mnemonic, true)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray with raw=true failed: %v", err)
+	}
+
+	// All should return the same length
+	if len(entropy1) != len(entropy2) || len(entropy2) != len(entropy3) {
+		t.Error("All calls should return entropy of the same length")
+	}
+}
+
+// TestNewSeedWithErrorCheckingError tests the error case in NewSeedWithErrorChecking
+func TestNewSeedWithErrorCheckingError(t *testing.T) {
+	// Test with an invalid mnemonic that should cause MnemonicToByteArray to return an error
+	invalidMnemonic := "invalid invalid invalid"
+	_, err := NewSeedWithErrorChecking(invalidMnemonic, "password")
+	if err == nil {
+		t.Error("NewSeedWithErrorChecking should return an error for invalid mnemonic")
+	}
+}
+
+// TestNewEntropyError tests the error case in NewEntropy
+func TestNewEntropyError(t *testing.T) {
+	// Test with invalid bit sizes that should cause ErrEntropyLength
+	invalidBitSizes := []int{127, 129, 160, 192, 224, 256, 257, 300}
+
+	for _, bitSize := range invalidBitSizes {
+		// Only test the ones that should actually fail
+		if bitSize < 128 || bitSize > 256 || bitSize%32 != 0 {
+			_, err := NewEntropy(bitSize)
+			if err != ErrEntropyLength {
+				t.Errorf("NewEntropy(%d) should return ErrEntropyLength, got %v", bitSize, err)
+			}
+		}
+	}
+
+	// Test with valid bit sizes that should succeed
+	validBitSizes := []int{128, 160, 192, 224, 256}
+
+	for _, bitSize := range validBitSizes {
+		entropy, err := NewEntropy(bitSize)
+		if err != nil {
+			t.Errorf("NewEntropy(%d) should not return an error, got %v", bitSize, err)
+		}
+		if len(entropy) != bitSize/8 {
+			t.Errorf("NewEntropy(%d) should return %d bytes, got %d", bitSize, bitSize/8, len(entropy))
+		}
+	}
+}
+
+// TestMnemonicToByteArrayRawParameter tests that our extended MnemonicToByteArray function
+// correctly handles the optional raw parameter
+func TestMnemonicToByteArrayRawParameter(t *testing.T) {
+	mnemonic := "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+	// Test without raw parameter (should work as before)
+	entropy1, err := MnemonicToByteArray(mnemonic)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray without raw parameter failed: %v", err)
+	}
+
+	// Test with raw parameter set to false (should work same as without parameter)
+	entropy2, err := MnemonicToByteArray(mnemonic, false)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray with raw=false failed: %v", err)
+	}
+
+	// Test with raw parameter set to true (should work same as without parameter in our implementation)
+	entropy3, err := MnemonicToByteArray(mnemonic, true)
+	if err != nil {
+		t.Errorf("MnemonicToByteArray with raw=true failed: %v", err)
+	}
+
+	// All should return the same result in our implementation
+	if len(entropy1) != len(entropy2) || len(entropy2) != len(entropy3) {
+		t.Error("All calls should return entropy of the same length")
+	}
+
+	// First two should be identical
+	for i := range entropy1 {
+		if entropy1[i] != entropy2[i] {
+			t.Errorf("entropy1[%d] != entropy2[%d]: %x != %x", i, i, entropy1[i], entropy2[i])
+		}
+	}
+}

@@ -6,6 +6,24 @@
 
 This repository contains Go implementations of BIP39 (mnemonic codes) and BIP32/BIP44 (hierarchical deterministic wallets).
 
+## Migration from Deprecated Packages
+
+This package was created as a direct replacement for popular but now-deleted packages:
+
+- `github.com/tyler-smith/go-bip39` - A widely-used BIP39 implementation that was recently deleted
+
+Many popular packages like `github.com/miguelmota/go-ethereum-hdwallet` are affected.
+
+If you're looking for alternatives to these packages or need to upgrade your dependencies, this repository provides a drop-in replacement with improved features and ongoing maintenance.
+
+This package maintains API compatibility with the deleted packages, including all the same function names:
+- `EntropyFromMnemonic()` for converting mnemonics back to entropy
+- `MnemonicToByteArray()` with optional raw parameter extension
+- `NewSeedWithErrorChecking()` for mnemonic validation before seed generation
+- `GetWordList()` and `GetWordIndex()` for wordlist operations
+
+Search terms: go-bip39, go-ethereum-hdwallet, BIP39 migration, HD wallet replacement
+
 
 ## Packages
 
