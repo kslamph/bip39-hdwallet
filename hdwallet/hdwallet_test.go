@@ -55,7 +55,7 @@ func TestNewMasterKey(t *testing.T) {
 func TestNewMasterKeyErrors(t *testing.T) {
 	// Test with invalid seed lengths
 	invalidLengths := []int{0, 1, 15, 65, 100}
-	
+
 	for _, length := range invalidLengths {
 		seed := make([]byte, length)
 		_, err := NewMasterKey(seed)
@@ -63,7 +63,7 @@ func TestNewMasterKeyErrors(t *testing.T) {
 			t.Errorf("NewMasterKey with %d-byte seed = %v; want ErrInvalidSeed", length, err)
 		}
 	}
-	
+
 	// Test with valid length but zero entropy (edge case)
 	// This is difficult to test because we can't easily create a seed that would
 	// result in a private key of zero or >= curve order N
@@ -125,7 +125,7 @@ func TestDeriveEdgeCases(t *testing.T) {
 
 	// Test derivation of hardened child from public key (should fail)
 	// This is already tested in TestDeriveErrors
-	
+
 	// Test derivation with invalid parent public key
 	// Create a public key with invalid data
 	invalidPublicKey := &Key{
@@ -295,7 +295,7 @@ func TestString(t *testing.T) {
 		ParentFingerprint: masterKey.ParentFingerprint,
 		IsPrivate:         false,
 	}
-	
+
 	publicStr := publicKey.String()
 	if publicStr == "" {
 		t.Error("String() returned empty string for public key")

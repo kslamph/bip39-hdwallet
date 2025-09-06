@@ -1,6 +1,11 @@
 # BIP39 and HD Wallet Implementation
 
+[![GoDoc](https://godoc.org/github.com/kslamph/bip39-hdwallet?status.svg)](https://godoc.org/github.com/kslamph/bip39-hdwallet)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kslamph/bip39-hdwallet)](https://goreportcard.com/report/github.com/kslamph/bip39-hdwallet)
+[![codecov](https://codecov.io/gh/kslamph/bip39-hdwallet/branch/main/graph/badge.svg)](https://codecov.io/gh/kslamph/bip39-hdwallet)
+
 This repository contains Go implementations of BIP39 (mnemonic codes) and BIP32/BIP44 (hierarchical deterministic wallets).
+
 
 ## Packages
 
@@ -9,7 +14,7 @@ This repository contains Go implementations of BIP39 (mnemonic codes) and BIP32/
 Implements the BIP39 specification for mnemonic codes.
 
 ```go
-import "github.com/yourusername/bip39-hdwallet/bip39"
+import "github.com/kslamph/bip39-hdwallet/bip39"
 ```
 
 #### Features
@@ -91,6 +96,10 @@ go get github.com/kslamph/bip39-hdwallet
 
 This implementation follows the BIP39, BIP32, and BIP44 specifications exactly. It uses cryptographic secure random number generation and industry standard hashing algorithms.
 
+## High Test Coverage
+
+This package maintains a high test coverage standard (over 85% for both packages) to ensure reliability and correctness of cryptographic operations.
+
 ## Testing
 
 Run tests with:
@@ -99,6 +108,17 @@ Run tests with:
 go test ./...
 ```
 
+## Coverage Reporting
+
+To generate and view local coverage reports:
+```bash
+# Generate coverage report
+go test -coverprofile=coverage.txt ./...
+
+# View coverage in browser
+go tool cover -html=coverage.txt
+```
+
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -1,12 +1,24 @@
+// Package bip39 implements the BIP39 specification for mnemonic codes.
+// BIP39 defines a method for creating a mnemonic code or mnemonic sentence
+// that can be used to generate deterministic wallets.
+//
+// The implementation includes:
+//   - Generating entropy for mnemonic creation
+//   - Converting entropy to mnemonic phrases
+//   - Validating mnemonic phrases
+//   - Converting mnemonic phrases back to entropy
+//   - Generating seeds from mnemonics with optional passphrases
+//
+// For more information, see https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
 package bip39
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"errors"
 	"fmt"
 	"strings"
-	"crypto/sha512"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -29,23 +41,22 @@ func getBits(buf []byte, bitOffset, numBits int) uint32 {
 	for i := 0; i < numBits; i++ {
 		byteIndex := (bitOffset + i) / 8
 		bitInByteIndex := (bitOffset + i) % 8
-		
+
 		// Check if we're trying to read beyond the buffer length
 		if byteIndex >= len(buf) {
 			// This case should not happen with correct inputs given length checks prior.
 			// However, to prevent panic, return 0 or an error if this were a public function.
 			// For internal helper, panic might be acceptable or indicates a larger logic error.
-			return 0 
+			return 0
 		}
 
 		// Read the bit. Bits are ordered MSB (0) to LSB (7) within a byte.
 		bit := (buf[byteIndex] >> (7 - bitInByteIndex)) & 0x01
-		
+
 		result = (result << 1) | uint32(bit)
 	}
 	return result
 }
-
 
 // indicesToBytes converts 11-bit word indices into a big-endian byte array.
 func indicesToBytes(indices []int, totalBits int) []byte {
@@ -75,9 +86,18 @@ func indicesToBytes(indices []int, totalBits int) []byte {
 	return buf
 }
 
-
-// NewEntropy generates a new entropy byte slice with the given bit size.
-// bitSize must be in [128, 256] and a multiple of 32.
+// NewEntropy generates a new cryptographically secure entropy byte slice with the given bit size.
+// The bitSize must be in [128, 256] and a multiple of 32 as per BIP39 specification.
+// Common values are 128 (12 words), 160 (15 words), 192 (18 words), 224 (21 words), and 256 (24 words).
+//
+// Parameters:
+//
+//	bitSize: The size of entropy in bits (must be 128, 160, 192, 224, or 256)
+//
+// Returns:
+//
+//	[]byte: The generated entropy bytes
+//	error: ErrEntropyLength if bitSize is invalid, or other crypto/rand errors
 func NewEntropy(bitSize int) ([]byte, error) {
 	if bitSize < 128 || bitSize > 256 || bitSize%32 != 0 {
 		return nil, ErrEntropyLength
@@ -92,7 +112,23 @@ func NewEntropy(bitSize int) ([]byte, error) {
 	return entropy, nil
 }
 
-// NewMnemonic generates a new mnemonic from the given entropy.
+// NewMnemonic generates a new mnemonic phrase from the given entropy according to BIP39 specification.
+// The function implements the BIP39 algorithm:
+//  1. Generate entropy (128-256 bits in multiples of 32)
+//  2. Create SHA256 hash of the entropy
+//  3. Take the first ENT/32 bits of the hash as checksum
+//  4. Append checksum to entropy
+//  5. Split the result into 11-bit chunks
+//  6. Map each chunk to a word in the BIP39 wordlist
+//
+// Parameters:
+//
+//	entropy: Byte slice containing the entropy (must be 128-256 bits in multiples of 32)
+//
+// Returns:
+//
+//	string: The mnemonic phrase (12, 15, 18, 21, or 24 words)
+//	error: ErrEntropyLength if entropy size is invalid, or ErrInvalidMnemonic if word lookup fails
 func NewMnemonic(entropy []byte) (string, error) {
 	// We only support 128-256 bits of entropy
 	entropyBitLength := len(entropy) * 8
@@ -107,10 +143,10 @@ func NewMnemonic(entropy []byte) (string, error) {
 
 	// Create a buffer with entropy + checksum
 	entropyWithChecksumBitLen := entropyBitLength + int(checksumBitLength)
-	
+
 	// Create a byte buffer to hold entropy + checksum bits
 	combinedBitsBuffer := make([]byte, (entropyWithChecksumBitLen+7)/8)
-	
+
 	// Copy entropy bytes directly
 	copy(combinedBitsBuffer, entropy)
 
@@ -119,14 +155,14 @@ func NewMnemonic(entropy []byte) (string, error) {
 	for i := 0; i < int(checksumBitLength); i++ {
 		// Get the i-th bit from the checksum byte (MSB to LSB)
 		bit := (hash[0] >> (7 - uint(i))) & 0x01
-		
+
 		// Calculate the global position for this checksum bit
 		globalBitPos := entropyBitLength + i
-		
+
 		// Set the bit in the combined buffer
 		byteIndex := globalBitPos / 8
 		bitInByteIndex := globalBitPos % 8
-		
+
 		if bit == 1 {
 			combinedBitsBuffer[byteIndex] |= (0x01 << (7 - bitInByteIndex))
 		}
@@ -134,28 +170,44 @@ func NewMnemonic(entropy []byte) (string, error) {
 
 	// Calculate the number of words needed
 	wordCount := entropyWithChecksumBitLen / 11
-	
+
 	// Generate the mnemonic words
 	words := make([]string, wordCount)
 	for i := 0; i < wordCount; i++ {
 		// Extract the 11-bit word index using the corrected getBits
 		wordIdx := getBits(combinedBitsBuffer, i*11, 11)
-		
+
 		// Convert to word
 		if int(wordIdx) >= len(Wordlist) {
 			return "", ErrInvalidMnemonic
 		}
 		words[i] = Wordlist[wordIdx]
 	}
-	
+
 	return strings.Join(words, " "), nil
 }
 
-// MnemonicToByteArray converts a mnemonic to its byte representation.
+// MnemonicToByteArray converts a mnemonic phrase back to its original entropy bytes.
+// This function implements the reverse of the BIP39 mnemonic generation process:
+//  1. Validate the mnemonic word count (12, 15, 18, 21, or 24 words)
+//  2. Map each word to its index in the BIP39 wordlist
+//  3. Convert indices to bit stream
+//  4. Split bit stream into entropy and checksum portions
+//  5. Verify checksum is correct
+//  6. Return the original entropy bytes
+//
+// Parameters:
+//
+//	mnemonic: The mnemonic phrase to convert (12, 15, 18, 21, or 24 words)
+//
+// Returns:
+//
+//	[]byte: The original entropy bytes
+//	error: ErrMnemonicLength for invalid word count, ErrInvalidMnemonic for invalid words or checksum
 func MnemonicToByteArray(mnemonic string) ([]byte, error) {
 	words := strings.Fields(mnemonic)
 	wordsLength := len(words)
-	
+
 	// Validate word count
 	if wordsLength < 12 || wordsLength > 24 || wordsLength%3 != 0 {
 		return nil, ErrMnemonicLength
@@ -179,11 +231,11 @@ func MnemonicToByteArray(mnemonic string) ([]byte, error) {
 
 	// Determine entropy and checksum bit lengths
 	entropyBitLength := (wordsLength * 11) - (wordsLength * 11 / 33) // Recalculate based on word length
-	checksumBitLength := wordsLength * 11 / 33 // Recalculate based on word length
-	
+	checksumBitLength := wordsLength * 11 / 33                       // Recalculate based on word length
+
 	// Extract entropy bytes from the combined buffer.
 	entropyBytes := make([]byte, entropyBitLength/8)
-	
+
 	for i := 0; i < entropyBitLength; i++ {
 		byteIndex := i / 8
 		bitInByteIndex := i % 8
@@ -196,11 +248,11 @@ func MnemonicToByteArray(mnemonic string) ([]byte, error) {
 	// Calculate the expected checksum from the extracted entropy.
 	expectedHash := sha256.Sum256(entropyBytes)
 	expectedChecksumValue := uint32(expectedHash[0] >> (8 - checksumBitLength))
-	
+
 	// Extract the actual checksum bits from the combinedBitsBuffer.
 	actualChecksumValue := uint32(0)
 	for i := 0; i < int(checksumBitLength); i++ {
-		bit := getBits(combinedBitsBuffer, entropyBitLength + i, 1) // Get 1 bit at a time from checksum part
+		bit := getBits(combinedBitsBuffer, entropyBitLength+i, 1) // Get 1 bit at a time from checksum part
 		actualChecksumValue = (actualChecksumValue << 1) | bit
 	}
 
@@ -212,15 +264,37 @@ func MnemonicToByteArray(mnemonic string) ([]byte, error) {
 	return entropyBytes, nil
 }
 
-// NewSeed generates a new seed from the given mnemonic and passphrase.
-// The passphrase can be empty.
+// NewSeed generates a new seed from the given mnemonic and passphrase using PBKDF2.
+// This function implements the BIP39 seed generation algorithm:
+//   - Uses PBKDF2 with HMAC-SHA512, 2048 rounds, and 64-byte output
+//   - Salt is "mnemonic" + passphrase (passphrase can be empty)
+//
+// Parameters:
+//
+//	mnemonic: The mnemonic phrase to generate seed from
+//	passphrase: Optional passphrase for additional security (can be empty)
+//
+// Returns:
+//
+//	[]byte: The 64-byte seed that can be used for HD wallet key derivation
 func NewSeed(mnemonic, passphrase string) []byte {
 	salt := "mnemonic" + passphrase
 	seed := pbkdf2.Key([]byte(mnemonic), []byte(salt), 2048, 64, sha512.New)
 	return seed
 }
 
-// IsMnemonicValid checks if a mnemonic is valid.
+// IsMnemonicValid checks if a mnemonic is valid by verifying:
+//  1. Correct word count (12, 15, 18, 21, or 24 words)
+//  2. All words exist in the BIP39 wordlist
+//  3. Checksum is correct
+//
+// Parameters:
+//
+//	mnemonic: The mnemonic phrase to validate
+//
+// Returns:
+//
+//	bool: true if the mnemonic is valid, false otherwise
 func IsMnemonicValid(mnemonic string) bool {
 	_, err := MnemonicToByteArray(mnemonic)
 	return err == nil

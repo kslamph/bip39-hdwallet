@@ -3,12 +3,12 @@ package tests
 import (
 	"encoding/hex"
 	"testing"
-	
+
 	"github.com/kslamph/bip39-hdwallet/hdwallet"
 )
 
 type bip32TestVector struct {
-	Seed       string
+	Seed        string
 	Derivations []struct {
 		Path   string
 		ExtPub string
@@ -142,15 +142,15 @@ func TestBIP32Vectors(t *testing.T) {
 	}
 
 	for _, tv := range testVectors {
-	seedBytes, err := hex.DecodeString(tv.Seed)
-	if err != nil {
-		t.Fatalf("Failed to decode seed: %v", err)
-	}
+		seedBytes, err := hex.DecodeString(tv.Seed)
+		if err != nil {
+			t.Fatalf("Failed to decode seed: %v", err)
+		}
 
-	masterKey, err := hdwallet.NewMasterKey(seedBytes)
-	if err != nil {
-		t.Fatalf("NewMasterKey failed for seed %s: %v", tv.Seed, err)
-	}
+		masterKey, err := hdwallet.NewMasterKey(seedBytes)
+		if err != nil {
+			t.Fatalf("NewMasterKey failed for seed %s: %v", tv.Seed, err)
+		}
 
 		for _, d := range tv.Derivations {
 			testName := "Seed-" + tv.Seed + "/Path-" + d.Path
