@@ -235,8 +235,8 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 	ilInt := new(big.Int).SetBytes(IL)
 
 	// Check if IL is valid (IL < n)
+	// This should theoretically not happen with HMAC-SHA512 output
 	if ilInt.Cmp(btcec.S256().N) >= 0 {
-		// This should theoretically not happen with HMAC-SHA512 output
 		return nil, ErrInvalidKey // Or, per spec, increment index and try again
 	}
 

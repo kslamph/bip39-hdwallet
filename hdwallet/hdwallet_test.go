@@ -781,3 +781,173 @@ func TestDerivePointAtInfinity(t *testing.T) {
 	// we'll skip this test for now as it's more of a theoretical edge case
 	t.Skip("Skipping point at infinity test - extremely rare edge case")
 }
+
+// TestDeriveFromPublic tests deriving non-hardened child keys from public keys
+func TestDeriveFromPublic(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+	if masterKey == nil {
+		t.Fatal("NewMasterKey() returned nil")
+	}
+
+	// Convert master key to public key
+	publicKey := &Key{
+		Key:               masterKey.PublicKey(),
+		ChainCode:         masterKey.ChainCode,
+		Depth:             masterKey.Depth,
+		Index:             masterKey.Index,
+		ParentFingerprint: masterKey.ParentFingerprint,
+		IsPrivate:         false, // This is a public key
+	}
+
+	// Derive a non-hardened child from the public key
+	// This should work and will exercise the uncovered code path
+	childKey, err := publicKey.Derive(0) // Non-hardened derivation
+	if err != nil {
+		t.Errorf("Derive() from public key error: %v", err)
+		return
+	}
+	if childKey == nil {
+		t.Error("Derive() from public key returned nil")
+		return
+	}
+
+	// Verify that the child key is also a public key (not private)
+	if childKey.IsPrivate {
+		t.Error("Child key derived from public key should also be public")
+	}
+
+	// Verify the child key has the correct properties
+	if childKey.Depth != 1 {
+		t.Errorf("Child key depth = %d; want 1", childKey.Depth)
+	}
+	if childKey.Index != 0 {
+		t.Errorf("Child key index = %d; want 0", childKey.Index)
+	}
+}
+
+// TestDeriveFromPublicMultipleChildren tests deriving multiple non-hardened child keys from public keys
+func TestDeriveFromPublicMultipleChildren(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+	if masterKey == nil {
+		t.Fatal("NewMasterKey() returned nil")
+	}
+
+	// Convert master key to public key
+	publicKey := &Key{
+		Key:               masterKey.PublicKey(),
+		ChainCode:         masterKey.ChainCode,
+		Depth:             masterKey.Depth,
+		Index:             masterKey.Index,
+		ParentFingerprint: masterKey.ParentFingerprint,
+		IsPrivate:         false,
+	}
+
+	// Test deriving multiple non-hardened children
+	testIndices := []uint32{0, 1, 2, 10, 100}
+
+	for _, index := range testIndices {
+		childKey, err := publicKey.Derive(index)
+		if err != nil {
+			t.Errorf("Derive(%d) from public key error: %v", index, err)
+			continue
+		}
+		if childKey == nil {
+			t.Errorf("Derive(%d) from public key returned nil", index)
+			continue
+		}
+
+		if childKey.IsPrivate {
+			t.Errorf("Child key derived from public key should also be public (index %d)", index)
+		}
+		if childKey.Depth != 1 {
+			t.Errorf("Child key depth = %d; want 1 (index %d)", childKey.Depth, index)
+		}
+		if childKey.Index != index {
+			t.Errorf("Child key index = %d; want %d", childKey.Index, index)
+		}
+	}
+}
+
+// TestDerivePathWithUppercaseM tests derivation paths with uppercase "M/" prefix
+func TestDerivePathWithUppercaseM(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+	if masterKey == nil {
+		t.Fatal("NewMasterKey() returned nil")
+	}
+
+	// Test simple path with uppercase "M/"
+	key, err := masterKey.DerivePath("M/0")
+	if err != nil {
+		t.Errorf("DerivePath(M/0) error: %v", err)
+	}
+	if key == nil {
+		t.Error("DerivePath(M/0) returned nil")
+	}
+
+	// Test hardened path with uppercase "M/"
+	key, err = masterKey.DerivePath("M/0'")
+	if err != nil {
+		t.Errorf("DerivePath(M/0') error: %v", err)
+	}
+	if key == nil {
+		t.Error("DerivePath(M/0') returned nil")
+	}
+
+	// Test complex path with uppercase "M/"
+	key, err = masterKey.DerivePath("M/0'/1/2'/2/1000000000")
+	if err != nil {
+		t.Errorf("DerivePath(M/0'/1/2'/2/1000000000) error: %v", err)
+	}
+	if key == nil {
+		t.Error("DerivePath(M/0'/1/2'/2/1000000000) returned nil")
+	}
+
+	// Verify that the results are the same as with lowercase "m/"
+	keyM, err := masterKey.DerivePath("M/0/1")
+	if err != nil {
+		t.Errorf("DerivePath(M/0/1) error: %v", err)
+	}
+	if keyM == nil {
+		t.Error("DerivePath(M/0/1) returned nil")
+	}
+
+	keym, err := masterKey.DerivePath("m/0/1")
+	if err != nil {
+		t.Errorf("DerivePath(m/0/1) error: %v", err)
+	}
+	if keym == nil {
+		t.Error("DerivePath(m/0/1) returned nil")
+	}
+
+	// The keys should be identical
+	if keyM.SerializedSize() != keym.SerializedSize() {
+		t.Error("Keys derived from M/ and m/ paths should have same serialized size")
+	}
+}
