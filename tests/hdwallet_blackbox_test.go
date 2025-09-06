@@ -142,33 +142,32 @@ func TestBIP32Vectors(t *testing.T) {
 	}
 
 	for _, tv := range testVectors {
-		t.Run("Seed-"+tv.Seed, func(t *testing.T) {
-			seedBytes, err := hex.DecodeString(tv.Seed)
-			if err != nil {
-				t.Fatalf("Failed to decode seed: %v", err)
-			}
+	seedBytes, err := hex.DecodeString(tv.Seed)
+	if err != nil {
+		t.Fatalf("Failed to decode seed: %v", err)
+	}
 
-			masterKey, err := hdwallet.NewMasterKey(seedBytes)
-			if err != nil {
-				t.Fatalf("NewMasterKey failed for seed %s: %v", tv.Seed, err)
-			}
+	masterKey, err := hdwallet.NewMasterKey(seedBytes)
+	if err != nil {
+		t.Fatalf("NewMasterKey failed for seed %s: %v", tv.Seed, err)
+	}
 
-			for _, d := range tv.Derivations {
-				t.Run(d.Path, func(t *testing.T) {
-					derivedKey, err := masterKey.DerivePath(d.Path)
-					if err != nil {
-						t.Errorf("DerivePath(%s) failed: %v", d.Path, err)
-						return
-					}
+		for _, d := range tv.Derivations {
+			testName := "Seed-" + tv.Seed + "/Path-" + d.Path
+			t.Run(testName, func(t *testing.T) {
+				derivedKey, err := masterKey.DerivePath(d.Path)
+				if err != nil {
+					t.Errorf("DerivePath(%s) failed for %s: %v", d.Path, tv.Seed, err)
+					return
+				}
 
-					if derivedKey.B58Serialize(true) != d.ExtPub {
-						t.Errorf("Derived ExtPub for path %s = %s; want %s", d.Path, derivedKey.B58Serialize(true), d.ExtPub)
-					}
-					if derivedKey.B58Serialize(false) != d.ExtPrv {
-						t.Errorf("Derived ExtPrv for path %s = %s; want %s", d.Path, derivedKey.B58Serialize(false), d.ExtPrv)
-					}
-				})
-			}
-		})
+				if derivedKey.B58Serialize(true) != d.ExtPub {
+					t.Errorf("Derived ExtPub for %s = %s; want %s", testName, derivedKey.B58Serialize(true), d.ExtPub)
+				}
+				if derivedKey.B58Serialize(false) != d.ExtPrv {
+					t.Errorf("Derived ExtPrv for %s = %s; want %s", testName, derivedKey.B58Serialize(false), d.ExtPrv)
+				}
+			})
+		}
 	}
 }
