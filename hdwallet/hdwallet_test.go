@@ -27,8 +27,12 @@ func TestNewMasterKey(t *testing.T) {
 	}
 
 	// Check the key length
-	if len(masterKey.Key) != 32 {
-		t.Errorf("Master key length = %d; want 32", len(masterKey.Key))
+	privKeyBytes, err := masterKey.PrivateKey()
+	if err != nil {
+		t.Errorf("Master key should be private: %v", err)
+	}
+	if len(privKeyBytes) != 32 {
+		t.Errorf("Master key length = %d; want 32", len(privKeyBytes))
 	}
 
 	// Check the chain code length
@@ -131,7 +135,7 @@ func TestDeriveEdgeCases(t *testing.T) {
 	// Test derivation with invalid parent public key
 	// Create a public key with invalid data
 	invalidPublicKey := &Key{
-		Key:               []byte("invalid"), // Invalid public key data
+		keyData:           []byte("invalid"), // Invalid public key data
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -162,7 +166,7 @@ func TestDeriveErrors(t *testing.T) {
 	// Test derivation of hardened child from public key (should fail)
 	// Create a public key
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -290,7 +294,7 @@ func TestString(t *testing.T) {
 	// Test String method on public key
 	// Create a public key by deriving a child and converting to public
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -386,7 +390,7 @@ func TestToWIF(t *testing.T) {
 	// Test ToWIF method on public key (should fail)
 	// Create a public key by deriving a child and converting to public
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -397,6 +401,44 @@ func TestToWIF(t *testing.T) {
 	_, err = publicKey.ToWIF()
 	if err == nil {
 		t.Error("ToWIF() on public key should return error")
+	}
+}
+
+// TestPrivateKey tests the PrivateKey method of Key
+func TestPrivateKey(t *testing.T) {
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+
+	// Test PrivateKey on a private key
+	privKeyBytes, err := masterKey.PrivateKey()
+	if err != nil {
+		t.Errorf("PrivateKey() on private key error: %v", err)
+	}
+	if len(privKeyBytes) != PrivateKeyLength {
+		t.Errorf("PrivateKey() length = %d; want %d", len(privKeyBytes), PrivateKeyLength)
+	}
+	if !bytes.Equal(privKeyBytes, masterKey.keyData) {
+		t.Error("PrivateKey() returned different bytes than keyData for private key")
+	}
+
+	// Test PrivateKey on a public key (should fail)
+	publicKey := &Key{
+		keyData:           masterKey.PublicKey(),
+		ChainCode:         masterKey.ChainCode,
+		Depth:             masterKey.Depth,
+		Index:             masterKey.Index,
+		ParentFingerprint: masterKey.ParentFingerprint,
+		IsPrivate:         false,
+	}
+	_, err = publicKey.PrivateKey()
+	if err == nil {
+		t.Error("PrivateKey() on public key should return error")
 	}
 }
 
@@ -453,7 +495,7 @@ func TestToECDSA(t *testing.T) {
 
 	// Test ToECDSA method on public key (should fail)
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -507,7 +549,7 @@ func TestPublicKeyEdgeCases(t *testing.T) {
 
 	// Test PublicKey on a public key (should return the same key)
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -536,7 +578,7 @@ func TestDeriveAdditionalEdgeCases(t *testing.T) {
 
 	// Test derivation of hardened child from public key (should fail)
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -664,7 +706,7 @@ func TestToWIFEdgeCases(t *testing.T) {
 
 	// Test ToWIF on public key (should fail)
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -693,7 +735,7 @@ func TestDeriveTargetedErrorCases(t *testing.T) {
 
 	// Test derivation of hardened child from public key (should fail)
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -708,7 +750,7 @@ func TestDeriveTargetedErrorCases(t *testing.T) {
 
 	// Test derivation with invalid parent public key
 	invalidPublicKey := &Key{
-		Key:               []byte("invalid"), // Invalid public key data
+		keyData:               []byte("invalid"), // Invalid public key data
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -792,7 +834,7 @@ func TestDerivePathTargetedEdgeCases(t *testing.T) {
 func TestDeriveInvalidParentPublicKey(t *testing.T) {
 	// Create a key with invalid public key data
 	invalidPubKey := &Key{
-		Key:               []byte("invalid public key data"),
+		keyData:               []byte("invalid public key data"),
 		ChainCode:         make([]byte, 32),
 		Depth:             1,
 		Index:             0,
@@ -869,7 +911,7 @@ func TestDeriveFromPublic(t *testing.T) {
 
 	// Convert master key to public key
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -921,7 +963,7 @@ func TestDeriveFromPublicMultipleChildren(t *testing.T) {
 
 	// Convert master key to public key
 	publicKey := &Key{
-		Key:               masterKey.PublicKey(),
+		keyData:               masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,

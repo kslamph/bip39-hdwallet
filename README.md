@@ -116,7 +116,7 @@ This implementation follows the BIP39, BIP32, and BIP44 specifications exactly. 
 
 ## High Test Coverage
 
-This package maintains a high test coverage standard (over 85% for both packages) to ensure reliability and correctness of cryptographic operations.
+This package maintains a high test coverage standard (over 95% for both packages) to ensure reliability and correctness of cryptographic operations.
 
 ## Testing
 

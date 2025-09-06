@@ -68,22 +68,23 @@ var (
 // It contains all the information needed to derive child keys and serialize
 // the key in various formats.
 type Key struct {
-	// Key is the actual key data: 33 bytes for compressed public key or 32 bytes for private key
-	Key []byte
+	// keyData holds the actual key bytes. It can be a 33-byte compressed public key
+	// or a 32-byte private key, distinguished by the IsPrivate field.
+	keyData []byte
 
-	// ChainCode is the 32-byte chain code used in key derivation
+	// ChainCode is the 32-byte chain code used in key derivation.
 	ChainCode []byte
 
-	// Depth is the key derivation depth (0 for master key)
+	// Depth is the key derivation depth (0 for master key).
 	Depth byte
 
-	// Index is the child index of this key (0x80000000 or higher for hardened keys)
+	// Index is the child index of this key (0x80000000 or higher for hardened keys).
 	Index uint32
 
-	// ParentFingerprint is the first 4 bytes of the parent key's hash
+	// ParentFingerprint is the first 4 bytes of the parent key's hash.
 	ParentFingerprint []byte
 
-	// IsPrivate indicates whether this is a private key (true) or public key (false)
+	// IsPrivate indicates whether this Key holds a private key (true) or a public key (false).
 	IsPrivate bool
 }
 
@@ -126,7 +127,7 @@ func NewMasterKey(seed []byte) (*Key, error) {
 	}
 
 	key := &Key{
-		Key:               IL,
+		keyData:           IL,
 		ChainCode:         IR,
 		Depth:             0x00,
 		Index:             0x00000000,
@@ -138,20 +139,52 @@ func NewMasterKey(seed []byte) (*Key, error) {
 }
 
 // PublicKey returns the compressed public key for this key.
-// If the key is already a public key, it returns the key directly.
+// If the key is already a public key, it returns the keyData directly.
 // If the key is a private key, it derives and returns the corresponding compressed public key.
+// This method ensures that a 33-byte compressed public key is always returned.
 //
 // Returns:
 //
-//	[]byte: The 33-byte compressed public key
+//	[]byte: The 33-byte compressed public key.
 func (k *Key) PublicKey() []byte {
 	if !k.IsPrivate {
-		return k.Key
+		return k.keyData
 	}
 
-	privKey, _ := btcec.PrivKeyFromBytes(k.Key)
+	// Derive public key from private key
+	privKey, _ := btcec.PrivKeyFromBytes(k.keyData)
 	pubKey := privKey.PubKey().SerializeCompressed()
 	return pubKey
+}
+
+// PrivateKey returns the raw 32-byte private key bytes if this Key is a private key.
+// This method explicitly indicates that the key is intended for private operations.
+//
+// Returns:
+//
+//	[]byte: The 32-byte private key.
+//	error: An error if the Key is not a private key (i.e., IsPrivate is false).
+func (k *Key) PrivateKey() ([]byte, error) {
+	if !k.IsPrivate {
+		return nil, fmt.Errorf("hdwallet: Key is not a private key")
+	}
+	return k.keyData, nil
+}
+
+// ToECDSA converts the private key to a standard *ecdsa.PrivateKey object.
+// This method is useful for integrating with other Go cryptography functions that
+// expect the standard library's ECDSA private key type.
+//
+// Returns:
+//
+//	*ecdsa.PrivateKey: The standard library ECDSA private key.
+//	error: An error if the Key is not a private key or if the conversion fails.
+func (k *Key) ToECDSA() (*ecdsa.PrivateKey, error) {
+	if !k.IsPrivate {
+		return nil, fmt.Errorf("hdwallet: cannot convert public Key to ECDSA private key")
+	}
+	privKey, _ := btcec.PrivKeyFromBytes(k.keyData)
+	return privKey.ToECDSA(), nil
 }
 
 // Fingerprint returns the key fingerprint as the first 4 bytes of the RIPEMD-160 hash
@@ -213,7 +246,7 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 		// Data = 0x00 || ser256(kpar) || ser32(i)
 		data = make([]byte, 37)
 		data[0] = 0x00
-		copy(data[1:], k.Key) // k.Key is private key here
+		copy(data[1:], k.keyData) // k.keyData is private key here
 		binary.BigEndian.PutUint32(data[33:], index)
 	} else {
 		// Normal child (i < 0x80000000)
@@ -247,7 +280,7 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 	if k.IsPrivate {
 		// Private parent key -> private child key
 		// k_i = (IL + k_par) mod n
-		parentPrivKeyInt := new(big.Int).SetBytes(k.Key) // k.Key is parent private key
+		parentPrivKeyInt := new(big.Int).SetBytes(k.keyData) // k.keyData is parent private key
 		childPrivKeyInt := new(big.Int).Add(ilInt, parentPrivKeyInt)
 		childPrivKeyInt.Mod(childPrivKeyInt, btcec.S256().N) // mod n
 
@@ -273,7 +306,7 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 		}
 
 		// Add parent public key K_par to point(IL)
-		parentPubKey, err := btcec.ParsePubKey(k.Key) // k.Key is parent public key
+		parentPubKey, err := btcec.ParsePubKey(k.keyData) // k.keyData is parent public key
 		if err != nil {
 			return nil, err // Invalid parent public key
 		}
@@ -294,7 +327,7 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 
 	// Create the child key
 	child := &Key{
-		Key:               childKeyBytes,
+		keyData:           childKeyBytes,
 		ChainCode:         IR,
 		Depth:             k.Depth + 1,
 		Index:             index,
@@ -379,14 +412,13 @@ func (k *Key) DerivePath(path string) (*Key, error) {
 }
 
 // String returns a human-readable string representation of the key.
-// For private keys, it returns the private key and chain code.
-// For public keys, it returns the public key and chain code.
-// This method is primarily intended for debugging purposes.
+// It displays the type of key (private or public) along with its key data and chain code.
+// This method is primarily intended for debugging and logging purposes.
 func (k *Key) String() string {
 	if k.IsPrivate {
-		return fmt.Sprintf("Private key: %x, Chain code: %x", k.Key, k.ChainCode)
+		return fmt.Sprintf("Private Key: %x, Chain Code: %x", k.keyData, k.ChainCode)
 	}
-	return fmt.Sprintf("Public key: %x, Chain code: %x", k.Key, k.ChainCode)
+	return fmt.Sprintf("Public Key: %x, Chain Code: %x", k.keyData, k.ChainCode)
 }
 
 // SerializedSize returns the size in bytes of the serialized extended key.
@@ -446,7 +478,7 @@ func (k *Key) B58Serialize(isPublic bool) string {
 	} else {
 		keyData = make([]byte, 33)
 		keyData[0] = 0x00 // Private key prefix
-		copy(keyData[1:], k.Key)
+		copy(keyData[1:], k.keyData)
 	}
 
 	// Concatenate all parts into a 78-byte payload
@@ -491,7 +523,7 @@ func (k *Key) ToWIF() (string, error) {
 	// This assumes the public key is compressed, which is standard for BIP44.
 	wifBytes := make([]byte, 0, PrivateKeyLength+2)
 	wifBytes = append(wifBytes, 0x80) // Mainnet prefix
-	wifBytes = append(wifBytes, k.Key...)
+	wifBytes = append(wifBytes, k.keyData...)
 	wifBytes = append(wifBytes, 0x01) // Compressed public key marker
 
 	// Double SHA256 hash for checksum
@@ -503,19 +535,3 @@ func (k *Key) ToWIF() (string, error) {
 	return base58.Encode(finalData), nil
 }
 
-// ToECDSA converts the private key to an *btcec.PrivateKey object.
-// This method only works if the Key is a private key.
-//
-// Returns:
-//
-//	*ecdsa.PrivateKey: The ECDSA private key from the standard Go crypto library
-//	error: An error if the key is not a private key or invalid
-func (k *Key) ToECDSA() (*ecdsa.PrivateKey, error) {
-	if !k.IsPrivate {
-		return nil, fmt.Errorf("hdwallet: key is not private")
-	}
-
-	// Convert btcec.PrivateKey to ecdsa.PrivateKey
-	privKey, _ := btcec.PrivKeyFromBytes(k.Key)
-	return privKey.ToECDSA(), nil
-}

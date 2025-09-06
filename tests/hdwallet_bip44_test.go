@@ -134,8 +134,12 @@ func TestBIP44Vectors(t *testing.T) {
 					t.Errorf("Private Key (WIF) mismatch for path %s. Got: %s, Want: %s", addr.Path, wif, addr.PrivateKey)
 				}
 			} else { // Ethereum/Tron use raw hex
-				if hex.EncodeToString(derivedAddressKey.Key) != addr.PrivateKey {
-					t.Errorf("Private Key (Hex) mismatch for path %s. Got: %s, Want: %s", addr.Path, hex.EncodeToString(derivedAddressKey.Key), addr.PrivateKey)
+				privKeyBytes, err := derivedAddressKey.PrivateKey()
+				if err != nil {
+					t.Fatalf("Failed to get private key for path %s: %v", addr.Path, err)
+				}
+				if hex.EncodeToString(privKeyBytes) != addr.PrivateKey {
+					t.Errorf("Private Key (Hex) mismatch for path %s. Got: %s, Want: %s", addr.Path, hex.EncodeToString(privKeyBytes), addr.PrivateKey)
 				}
 			}
 		}
