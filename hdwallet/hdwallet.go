@@ -11,9 +11,9 @@ import (
 	"strconv" // Added for DerivePath parsing
 	"strings" // Added for path parsing
 
-	"golang.org/x/crypto/ripemd160"
+	"github.com/btcsuite/btcd/btcec/v2"       // Added btcec/v2
 	"github.com/btcsuite/btcd/btcutil/base58" // Will use base58.Encode only
-	"github.com/btcsuite/btcd/btcec/v2"      // Added btcec/v2
+	"golang.org/x/crypto/ripemd160"
 )
 
 const (
@@ -49,12 +49,12 @@ var (
 
 // Key represents a BIP32 key
 type Key struct {
-	Key       []byte // 33 bytes (compressed public key) or 32 bytes (private key)
-	ChainCode []byte // 32 bytes
-	Depth     byte   // 1 byte
-	Index     uint32 // 4 bytes
+	Key               []byte // 33 bytes (compressed public key) or 32 bytes (private key)
+	ChainCode         []byte // 32 bytes
+	Depth             byte   // 1 byte
+	Index             uint32 // 4 bytes
 	ParentFingerprint []byte // 4 bytes
-	IsPrivate             bool
+	IsPrivate         bool
 }
 
 // NewMasterKey creates a new master key from a seed
@@ -196,7 +196,7 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 		}
 
 		childPubKeyX, childPubKeyY := btcec.S256().Add(ilPointX, ilPointY, parentPubKey.X(), parentPubKey.Y())
-		
+
 		// Serialize compressed
 		// Manually create compressed public key bytes from X and Y coordinates.
 		childKeyBytes = make([]byte, PublicKeyCompressedLength)
@@ -348,4 +348,28 @@ func (k *Key) B58Serialize(isPublic bool) string {
 
 	// Base58 encode the result
 	return base58.Encode(finalData)
+}
+
+// ToWIF converts a private key to Wallet Import Format (WIF).
+func (k *Key) ToWIF() (string, error) {
+	if !k.IsPrivate {
+		return "", fmt.Errorf("cannot convert public key to WIF")
+	}
+
+	// For mainnet Bitcoin, the prefix is 0x80.
+	// For compressed WIF, append 0x01.
+	// This assumes the public key is compressed, which is standard for BIP44.
+	wifBytes := make([]byte, 0, PrivateKeyLength+2)
+	wifBytes = append(wifBytes, 0x80)
+	wifBytes = append(wifBytes, k.Key...)
+	wifBytes = append(wifBytes, 0x01) // Compressed public key
+
+	// Double SHA256 hash
+	firstHash := sha256.Sum256(wifBytes)
+	secondHash := sha256.Sum256(firstHash[:])
+	checksum := secondHash[:4]
+
+	// Append checksum and Base58 encode
+	finalData := append(wifBytes, checksum...)
+	return base58.Encode(finalData), nil
 }
