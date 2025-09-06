@@ -549,7 +549,7 @@ func TestPublicKeyEdgeCases(t *testing.T) {
 
 	// Test PublicKey on a public key (should return the same key)
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -578,7 +578,7 @@ func TestDeriveAdditionalEdgeCases(t *testing.T) {
 
 	// Test derivation of hardened child from public key (should fail)
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -706,7 +706,7 @@ func TestToWIFEdgeCases(t *testing.T) {
 
 	// Test ToWIF on public key (should fail)
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -735,7 +735,7 @@ func TestDeriveTargetedErrorCases(t *testing.T) {
 
 	// Test derivation of hardened child from public key (should fail)
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -750,7 +750,7 @@ func TestDeriveTargetedErrorCases(t *testing.T) {
 
 	// Test derivation with invalid parent public key
 	invalidPublicKey := &Key{
-		keyData:               []byte("invalid"), // Invalid public key data
+		keyData:           []byte("invalid"), // Invalid public key data
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -834,7 +834,7 @@ func TestDerivePathTargetedEdgeCases(t *testing.T) {
 func TestDeriveInvalidParentPublicKey(t *testing.T) {
 	// Create a key with invalid public key data
 	invalidPubKey := &Key{
-		keyData:               []byte("invalid public key data"),
+		keyData:           []byte("invalid public key data"),
 		ChainCode:         make([]byte, 32),
 		Depth:             1,
 		Index:             0,
@@ -911,7 +911,7 @@ func TestDeriveFromPublic(t *testing.T) {
 
 	// Convert master key to public key
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,
@@ -963,7 +963,7 @@ func TestDeriveFromPublicMultipleChildren(t *testing.T) {
 
 	// Convert master key to public key
 	publicKey := &Key{
-		keyData:               masterKey.PublicKey(),
+		keyData:           masterKey.PublicKey(),
 		ChainCode:         masterKey.ChainCode,
 		Depth:             masterKey.Depth,
 		Index:             masterKey.Index,

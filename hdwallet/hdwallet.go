@@ -534,4 +534,3 @@ func (k *Key) ToWIF() (string, error) {
 	finalData := append(wifBytes, checksum...)
 	return base58.Encode(finalData), nil
 }
-
