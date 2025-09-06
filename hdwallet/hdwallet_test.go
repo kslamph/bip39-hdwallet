@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/btcsuite/btcd/btcec/v2"
 )
 
 func TestNewMasterKey(t *testing.T) {
@@ -395,6 +397,73 @@ func TestToWIF(t *testing.T) {
 	_, err = publicKey.ToWIF()
 	if err == nil {
 		t.Error("ToWIF() on public key should return error")
+	}
+}
+
+// TestToECDSA tests the ToECDSA method of Key
+func TestToECDSA(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+
+	// Test ToECDSA method on private key
+	ecdsaPrivKey, err := masterKey.ToECDSA()
+	if err != nil {
+		t.Errorf("ToECDSA() error: %v", err)
+	}
+	if ecdsaPrivKey == nil {
+		t.Error("ToECDSA() returned nil private key")
+	}
+
+	// Verify that the public key derived from the ECDSA private key matches the hdwallet public key
+	// Convert the *ecdsa.PublicKey back to compressed bytes for comparison
+	// btcec.S256() is the curve used by BIP32
+	// Convert ecdsa.PublicKey to btcec.PublicKey by first serializing to uncompressed bytes
+	// and then parsing with btcec.ParsePubKey.
+	// The uncompressed public key format is 0x04 || X || Y.
+	if ecdsaPrivKey.PublicKey.X == nil {
+		t.Fatal("ecdsaPrivKey.PublicKey.X is nil")
+	}
+	if ecdsaPrivKey.PublicKey.Y == nil {
+		t.Fatal("ecdsaPrivKey.PublicKey.Y is nil")
+	}
+
+	xBytes := ecdsaPrivKey.PublicKey.X.FillBytes(make([]byte, 32))
+	yBytes := ecdsaPrivKey.PublicKey.Y.FillBytes(make([]byte, 32))
+	uncompressedPubKeyBytes := make([]byte, 1, 65)
+	uncompressedPubKeyBytes[0] = 0x04
+	uncompressedPubKeyBytes = append(uncompressedPubKeyBytes, xBytes...)
+	uncompressedPubKeyBytes = append(uncompressedPubKeyBytes, yBytes...)
+
+	btcecPubKey, err := btcec.ParsePubKey(uncompressedPubKeyBytes)
+	if err != nil {
+		t.Fatalf("Failed to parse btcec public key from uncompressed bytes: %v", err)
+	}
+	pubKeyCompressed := btcecPubKey.SerializeCompressed()
+	if !bytes.Equal(pubKeyCompressed, masterKey.PublicKey()) {
+		t.Error("Public key derived from ECDSA private key does not match hdwallet public key")
+	}
+
+	// Test ToECDSA method on public key (should fail)
+	publicKey := &Key{
+		Key:               masterKey.PublicKey(),
+		ChainCode:         masterKey.ChainCode,
+		Depth:             masterKey.Depth,
+		Index:             masterKey.Index,
+		ParentFingerprint: masterKey.ParentFingerprint,
+		IsPrivate:         false,
+	}
+
+	_, err = publicKey.ToECDSA()
+	if err == nil {
+		t.Error("ToECDSA() on public key should return error")
 	}
 }
 

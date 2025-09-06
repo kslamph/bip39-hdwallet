@@ -17,6 +17,7 @@
 package hdwallet
 
 import (
+	"crypto/ecdsa" // Added for ToECDSA method
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -497,8 +498,24 @@ func (k *Key) ToWIF() (string, error) {
 	firstHash := sha256.Sum256(wifBytes)
 	secondHash := sha256.Sum256(firstHash[:])
 	checksum := secondHash[:4]
-
 	// Append checksum and Base58 encode
 	finalData := append(wifBytes, checksum...)
 	return base58.Encode(finalData), nil
+}
+
+// ToECDSA converts the private key to an *btcec.PrivateKey object.
+// This method only works if the Key is a private key.
+//
+// Returns:
+//
+//	*ecdsa.PrivateKey: The ECDSA private key from the standard Go crypto library
+//	error: An error if the key is not a private key or invalid
+func (k *Key) ToECDSA() (*ecdsa.PrivateKey, error) {
+	if !k.IsPrivate {
+		return nil, fmt.Errorf("hdwallet: key is not private")
+	}
+
+	// Convert btcec.PrivateKey to ecdsa.PrivateKey
+	privKey, _ := btcec.PrivKeyFromBytes(k.Key)
+	return privKey.ToECDSA(), nil
 }
