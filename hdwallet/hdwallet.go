@@ -294,9 +294,6 @@ func (k *Key) Derive(index uint32) (*Key, error) {
 	} else {
 		// Public parent key -> public child key (only for non-hardened children)
 		// K_i = point(IL) + K_par
-		if index >= HardenedKeyStart {
-			return nil, ErrDerivingHardenedFromPublic // Should have been caught earlier
-		}
 
 		// Convert IL to a point on the curve
 		// K_i = point(IL)
