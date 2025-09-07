@@ -443,3 +443,59 @@ func TestMnemonicToByteArrayRawParameter(t *testing.T) {
 		}
 	}
 }
+
+// TestMnemonicChecksumMismatch tests the checksum verification mismatch scenario
+// This test specifically covers the case where expectedChecksumValue != actualChecksumValue
+func TestMnemonicChecksumMismatch(t *testing.T) {
+	// Create a valid mnemonic first
+	entropy, err := hex.DecodeString("00000000000000000000000000000000")
+	if err != nil {
+		t.Fatalf("Failed to decode entropy hex: %v", err)
+	}
+
+	validMnemonic, err := NewMnemonic(entropy)
+	if err != nil {
+		t.Fatalf("Failed to create valid mnemonic: %v", err)
+	}
+
+	// Test 1: Modify the last word to create a checksum mismatch
+	words := strings.Fields(validMnemonic)
+	originalLastWord := words[len(words)-1]
+
+	// Replace the last word with a different valid word that will cause checksum mismatch
+	// Using "art" instead of "about" (both are valid words but will create different checksums)
+	words[len(words)-1] = "art"
+	invalidMnemonic := strings.Join(words, " ")
+
+	// This should fail with checksum mismatch error
+	_, err = MnemonicToByteArray(invalidMnemonic)
+	if err == nil {
+		t.Error("MnemonicToByteArray should have failed with checksum mismatch")
+	} else if err != ErrInvalidMnemonic {
+		t.Errorf("Expected ErrInvalidMnemonic, got: %v", err)
+	}
+
+	// Test 2: Restore original word and verify it works
+	words[len(words)-1] = originalLastWord
+	validMnemonic2 := strings.Join(words, " ")
+	_, err = MnemonicToByteArray(validMnemonic2)
+	if err != nil {
+		t.Errorf("Restored mnemonic should work: %v", err)
+	}
+
+	// Test 3: Create a more reliable checksum mismatch by modifying multiple words
+	// This ensures we definitely trigger the checksum verification failure
+	words = strings.Fields(validMnemonic)
+	if len(words) >= 3 {
+		// Change multiple words to ensure checksum mismatch
+		words[0] = "zoo" // This should definitely cause checksum mismatch
+		words[1] = "zoo"
+		invalidChecksumMnemonic := strings.Join(words, " ")
+		_, err = MnemonicToByteArray(invalidChecksumMnemonic)
+		if err == nil {
+			t.Error("Mnemonic with modified words should fail checksum verification")
+		} else if err != ErrInvalidMnemonic {
+			t.Errorf("Expected ErrInvalidMnemonic for modified words, got: %v", err)
+		}
+	}
+}
