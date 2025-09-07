@@ -997,6 +997,97 @@ func TestDeriveFromPublicMultipleChildren(t *testing.T) {
 	}
 }
 
+// TestDerivePathEmptySegments tests derivation paths with empty segments that trigger len(part) == 0
+func TestDerivePathEmptySegments(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+	if masterKey == nil {
+		t.Fatal("NewMasterKey() returned nil")
+	}
+
+	// Test cases that should trigger len(part) == 0 in DerivePath function
+	testCases := []struct {
+		path        string
+		description string
+		expectDepth byte // Expected depth after derivation (0 means no derivation occurred)
+	}{
+		{"/0/1", "Leading slash creates empty segment", 2},              // "/0/1" -> ["", "0", "1"] -> ["0", "1"] -> depth 2
+		{"0//1", "Consecutive slashes create empty segment", 2},         // "0//1" -> ["0", "", "1"] -> ["0", "1"] -> depth 2
+		{"0/1/", "Trailing slash creates empty segment", 2},             // "0/1/" -> ["0", "1", ""] -> ["0", "1"] -> depth 2
+		{"//0/1", "Multiple leading slashes create empty segments", 2},  // "//0/1" -> ["", "", "0", "1"] -> ["0", "1"] -> depth 2
+		{"0/1//", "Multiple trailing slashes create empty segments", 2}, // "0/1//" -> ["0", "1", "", ""] -> ["0", "1"] -> depth 2
+		{"/", "Single slash creates empty segment", 0},                  // "/" -> [""] -> [] -> no derivation, depth 0
+		{"//", "Double slash creates empty segments", 0},                // "//" -> ["", ""] -> [] -> no derivation, depth 0
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			key, err := masterKey.DerivePath(tc.path)
+			if err != nil {
+				t.Errorf("DerivePath(%s) error: %v", tc.path, err)
+			}
+			if key == nil {
+				t.Errorf("DerivePath(%s) returned nil", tc.path)
+			}
+			// Check that the depth matches expectations
+			if key.Depth != tc.expectDepth {
+				t.Errorf("DerivePath(%s) depth = %d; want %d", tc.path, key.Depth, tc.expectDepth)
+			}
+		})
+	}
+}
+
+// TestDerivePathHardenedFromPublic tests that deriving hardened children from public keys returns error
+func TestDerivePathHardenedFromPublic(t *testing.T) {
+	// Create a master key
+	seed, err := hex.DecodeString("000102030405060708090a0b0c0d0e0f")
+	if err != nil {
+		t.Fatalf("Failed to decode seed hex: %v", err)
+	}
+
+	masterKey, err := NewMasterKey(seed)
+	if err != nil {
+		t.Fatalf("NewMasterKey() error: %v", err)
+	}
+	if masterKey == nil {
+		t.Fatal("NewMasterKey() returned nil")
+	}
+
+	// Convert master key to public key
+	publicKey := &Key{
+		keyData:           masterKey.PublicKey(),
+		ChainCode:         masterKey.ChainCode,
+		Depth:             masterKey.Depth,
+		Index:             masterKey.Index,
+		ParentFingerprint: masterKey.ParentFingerprint,
+		IsPrivate:         false,
+	}
+
+	// Test deriving hardened child from public key - this should trigger error at line 404
+	_, err = publicKey.DerivePath("m/0'")
+	if err == nil {
+		t.Error("DerivePath with hardened child from public key should return error")
+	} else if err != ErrDerivingHardenedFromPublic {
+		t.Errorf("DerivePath with hardened child from public key returned unexpected error: %v", err)
+	}
+
+	// Test deriving multiple hardened children from public key
+	_, err = publicKey.DerivePath("m/0'/1'")
+	if err == nil {
+		t.Error("DerivePath with multiple hardened children from public key should return error")
+	} else if err != ErrDerivingHardenedFromPublic {
+		t.Errorf("DerivePath with multiple hardened children from public key returned unexpected error: %v", err)
+	}
+}
+
 // TestDerivePathWithUppercaseM tests derivation paths with uppercase "M/" prefix
 func TestDerivePathWithUppercaseM(t *testing.T) {
 	// Create a master key
